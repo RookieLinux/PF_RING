@@ -1049,7 +1049,7 @@ static inline int check_free_ring_slot(struct pf_ring_socket *pfr)
     if(pfr->tx.enable_tx_with_bounce && pfr->header_len == long_pkt_header)
       queued_pkts = num_kernel_queued_pkts(pfr);
     else
-      queued_pkts = num_queued_pkts(pfr);
+      queued_pkts = num_queued_pkts(pfr);//tot_insert-tot_read 插入的总包数减去读取的总包数
 
     if(queued_pkts >= pfr->slots_info->min_num_slots)
       return(0); /* Memory is full */
@@ -1238,7 +1238,7 @@ static void ring_proc_add(struct pf_ring_socket *pfr)
     snprintf(pfr->sock_proc_name, sizeof(pfr->sock_proc_name),
              "%d-%s.%d", pfr->ring_pid, pfr->ring_dev->dev->name, pfr->ring_id);
 
-    proc_create_data(pfr->sock_proc_name, 0, netns->proc_dir, &ring_proc_fops, pfr);
+    proc_create_data(pfr->sock_proc_name, 0, netns->proc_dir, &ring_proc_fops, pfr);//创建proc条目
 
     debug_printk(2, "Added /proc/net/pf_ring/%s\n", pfr->sock_proc_name);
   }
@@ -1871,7 +1871,7 @@ static int ring_proc_get_info(struct seq_file *m, void *data_not_used)
 
 static void ring_proc_init(pf_ring_net *netns)
 {
-  netns->proc_dir = proc_mkdir("pf_ring", netns->net->proc_net);
+  netns->proc_dir = proc_mkdir("pf_ring", netns->net->proc_net);//创建目录
 
   if(netns->proc_dir == NULL) {
     printk("[PF_RING] unable to create /proc/net/pf_ring [net=%pK]\n", netns->net);
@@ -1884,7 +1884,7 @@ static void ring_proc_init(pf_ring_net *netns)
   netns->proc = proc_create(PROC_INFO /* name */,
                           0 /* read-only */,
                           netns->proc_dir /* parent */,
-                          &ring_proc_fops /* file operations */);
+                          &ring_proc_fops /* file operations */);//创建文件
 
   if(netns->proc == NULL) {
     printk("[PF_RING] unable to register proc file [net=%pK]\n", netns->net);
@@ -1993,16 +1993,16 @@ static int ring_alloc_mem(struct sock *sk)
   else
     pfr->slot_header_len = sizeof(struct pfring_pkthdr);
 
-  slot_len = compute_ring_slot_len(pfr, pfr->bucket_len);
-  tot_mem = compute_ring_tot_mem(num_slots, slot_len);
+    slot_len = compute_ring_slot_len(pfr, pfr->bucket_len);//ALIGN(pfr->slot_header_len + pfr->bucket_len + sizeof(u_int16_t) /* RING_MAGIC_VALUE */, sizeof(u_int64_t))
+    tot_mem = compute_ring_tot_mem(num_slots, slot_len);//(u_int64_t) sizeof(FlowSlotInfo) + ((u_int64_t) num_slots * slot_len)
 
   /* In case of jumbo MTU (9K) or lo (65K), recompute the ring size */
-  if (pfr->bucket_len > 1600) {
+  if (pfr->bucket_len > 1600) { //重新计算内存长度tot_mem,并计算num_slots(单个元素大小为旧的slot_len)
     /* Compute the ring size assuming a standard MTU to limit the ring size */
     u_int32_t virtual_bucket_len = 1600, virtual_slot_len;
     virtual_slot_len = compute_ring_slot_len(pfr, virtual_bucket_len);
     tot_mem = compute_ring_tot_mem(num_slots, virtual_slot_len);
-    num_slots = compute_ring_actual_min_num_slots(tot_mem, slot_len);
+    num_slots = compute_ring_actual_min_num_slots(tot_mem, slot_len);//使用do_div计算返回商 即num_slots
 
     /* Ensure a min num slots = MIN_NUM_SLOTS */
     if (num_slots < MIN_NUM_SLOTS) {
@@ -2023,7 +2023,7 @@ static int ring_alloc_mem(struct sock *sk)
   }
 
   /* Memory is already zeroed */
-  pfr->ring_memory = allocate_shared_memory(&tot_mem);
+  pfr->ring_memory = allocate_shared_memory(&tot_mem);//内部调用vmalloc_user分配虚拟内存 会更改tot_mem(对齐)
 
   if(pfr->ring_memory != NULL) {
     debug_printk(2, "successfully allocated %lu bytes at 0x%08lx\n",
@@ -2068,13 +2068,13 @@ static inline int ring_insert(struct sock *sk)
 
   debug_printk(2, "ring_insert\n");
 
-  if(lockless_list_add(&ring_table, sk) == -1)
+  if(lockless_list_add(&ring_table, sk) == -1)//ring_table.list_elements[i]=sk
     return -1;
 
   atomic_inc(&ring_table_size);
 
   pfr = (struct pf_ring_socket *) ring_sk(sk);
-  bitmap_zero(pfr->pf_dev_mask, MAX_NUM_DEV_IDX);
+  bitmap_zero(pfr->pf_dev_mask, MAX_NUM_DEV_IDX);//1024位
   pfr->num_bound_devices = 0;
 
   return 0;
@@ -2316,16 +2316,16 @@ static int parse_raw_pkt(u_char *data, u_int32_t data_len,
     if(data_len < hdr->extended_hdr.parsed_pkt.offset.l3_offset + sizeof(struct iphdr)) return(0);
 
     ip = (struct iphdr *)(&data[hdr->extended_hdr.parsed_pkt.offset.l3_offset]);
-    *ip_id = ip->id, frag_off = ntohs(ip->frag_off);
+    *ip_id = ip->id, frag_off = ntohs(ip->frag_off);//16位标识 13位片偏移
 
-    if(frag_off & 0x1FFF /* Fragment offset */)
+    if(frag_off & 0x1FFF /* Fragment offset */)  //分包偏移位置
       hdr->extended_hdr.flags |= PKT_FLAGS_IP_FRAG_OFFSET; /* Packet offset > 0 */
-    if(frag_off & 0x2000 /* More Fragments set */)
+    if(frag_off & 0x2000 /* More Fragments set */) //MF标志 还有额外的分包
       hdr->extended_hdr.flags |= PKT_FLAGS_IP_MORE_FRAG;
 
     hdr->extended_hdr.parsed_pkt.ipv4_src = ntohl(ip->saddr);
     hdr->extended_hdr.parsed_pkt.ipv4_dst = ntohl(ip->daddr);
-    hdr->extended_hdr.parsed_pkt.l3_proto = ip->protocol;
+    hdr->extended_hdr.parsed_pkt.l3_proto = ip->protocol;//ip协议类型
     hdr->extended_hdr.parsed_pkt.ipv4_tos = ip->tos;
     fragment_offset = ip->frag_off & htons(IP_OFFSET); /* fragment, but not the first */
     ip_len  = ip->ihl*4;
@@ -2393,7 +2393,7 @@ static int parse_raw_pkt(u_char *data, u_int32_t data_len,
   if (ip_len == 0)
     return(0); /* Bogus IP */
 
-  hdr->extended_hdr.parsed_pkt.offset.l4_offset = hdr->extended_hdr.parsed_pkt.offset.l3_offset+ip_len;
+  hdr->extended_hdr.parsed_pkt.offset.l4_offset = hdr->extended_hdr.parsed_pkt.offset.l3_offset+ip_len; //4层开始地址
 
   if(!fragment_offset) {
     if(hdr->extended_hdr.parsed_pkt.l3_proto == IPPROTO_TCP) {          /* TCP */
@@ -2417,7 +2417,7 @@ static int parse_raw_pkt(u_char *data, u_int32_t data_len,
       udp = (struct udphdr *)(&data[hdr->extended_hdr.parsed_pkt.offset.l4_offset]);
 
       hdr->extended_hdr.parsed_pkt.l4_src_port = ntohs(udp->source), hdr->extended_hdr.parsed_pkt.l4_dst_port = ntohs(udp->dest);
-      hdr->extended_hdr.parsed_pkt.offset.payload_offset = hdr->extended_hdr.parsed_pkt.offset.l4_offset + sizeof(struct udphdr);
+      hdr->extended_hdr.parsed_pkt.offset.payload_offset = hdr->extended_hdr.parsed_pkt.offset.l4_offset + sizeof(struct udphdr);//udp数据开始地址
 
       /* GTP */
       if((hdr->extended_hdr.parsed_pkt.l4_src_port == GTP_SIGNALING_PORT)
@@ -2699,9 +2699,9 @@ static int parse_pkt(struct sk_buff *skb,
 
   /* hdr->extended_hdr.process.pid = task_pid_nr(current); */
 
-  skb_copy_bits(skb, -skb_displ, buffer, data_len);
+  skb_copy_bits(skb, -skb_displ, buffer, data_len);//偏移是以skb->data为基准的
 
-  rc = parse_raw_pkt(buffer, data_len, hdr, ip_id);
+  rc = parse_raw_pkt(buffer, data_len, hdr, ip_id);//根据buffer解析l2 l3 l4层头信息于hdr中 ip_id存放的是ip数据报的标识
 
   /* Check for stripped vlan id (hw offload) */
 
@@ -3110,18 +3110,18 @@ static inline int copy_data_to_ring(struct sk_buff *skb,
   }
 
   off = pfr->slots_info->insert_off;
-  pfr->slots_info->tot_pkts++;
-
+  pfr->slots_info->tot_pkts++; //总包数
+  //检测ring是否有空间可以容纳新包
   if(!check_free_ring_slot(pfr)) /* Full */ {
     /* No room left */
 
-    pfr->slots_info->tot_lost++;
+    pfr->slots_info->tot_lost++; //丢包数
 
    if(do_lock) spin_unlock_bh(&pfr->ring_index_lock);
     return(0);
   }
 
-  ring_bucket = get_slot(pfr, off);
+  ring_bucket = get_slot(pfr, off);//get_slot返回&(pfr->ring_slots[off])
 
   if(skb != NULL) {
     /* Copy skb data */
@@ -3129,7 +3129,7 @@ static inline int copy_data_to_ring(struct sk_buff *skb,
     hdr->caplen = min_val(hdr->caplen, pfr->bucket_len - offset);
 
     if(hdr->ts.tv_sec == 0)
-      set_skb_time(skb, hdr);
+      set_skb_time(skb, hdr); //读取skb的时间赋值给hdr的成员
 
 #if(LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,39))
     if(skb->dev->features & NETIF_F_RXCSUM) {
@@ -3166,7 +3166,7 @@ static inline int copy_data_to_ring(struct sk_buff *skb,
                  skb->len, (unsigned int) (hdr->caplen - (sizeof(struct ethhdr) + sizeof(struct eth_vlan_hdr))));
 
       } else {
-        skb_copy_bits(skb, -displ, &ring_bucket[pfr->slot_header_len + offset], (int) hdr->caplen);
+        skb_copy_bits(skb, -displ, &ring_bucket[pfr->slot_header_len + offset], (int) hdr->caplen);//偏移是以skb->data为基准的
       }
     }
 
@@ -3199,18 +3199,18 @@ static inline int copy_data_to_ring(struct sk_buff *skb,
   memset(&ring_bucket[pfr->slot_header_len + offset + hdr->caplen], RING_MAGIC_VALUE, sizeof(u_int16_t));
 
   /* Update insert offset */
-  pfr->slots_info->insert_off = get_next_slot_offset(pfr, off);
+  pfr->slots_info->insert_off = get_next_slot_offset(pfr, off);//插入数据的位置
 
   /* NOTE: smp_* barriers are _compiler_ barriers on UP, mandatory barriers on SMP
    * a consumer _must_ see the new value of tot_insert only after the buffer update completes */
   smp_mb(); //wmb();
 
-  pfr->slots_info->tot_insert++;
+  pfr->slots_info->tot_insert++;//已插入总包数
 
  if(do_lock) spin_unlock_bh(&pfr->ring_index_lock);
 
  if(num_queued_pkts(pfr) >= pfr->poll_num_pkts_watermark)
-    wake_up_interruptible(&pfr->ring_slots_waitqueue);
+    wake_up_interruptible(&pfr->ring_slots_waitqueue);  //到达包水位阈值唤醒等待队列
 
   return(1);
 }
@@ -3808,7 +3808,7 @@ int bpf_filter_skb(struct sk_buff *skb,
     res = SK_RUN_FILTER(filter, skb);
 #else
     //res = (sk_filter(pfr->sk, skb) == 0) ? 1 : 0;
-    res = bpf_prog_run_clear_cb(filter->prog, skb);
+    res = bpf_prog_run_clear_cb(filter->prog, skb);//返回值：表示是否匹配过滤条件，通常非零表示匹配通过，数据包将被保留
 #endif
   }
 
@@ -3901,7 +3901,7 @@ static int add_skb_to_ring(struct sk_buff *skb,
   u32 remainder;
 
   if(pfr && pfr->rehash_rss != NULL && skb->dev)
-    channel_id = pfr->rehash_rss(skb, hdr) % get_num_rx_queues(skb->dev);
+    channel_id = pfr->rehash_rss(skb, hdr) % get_num_rx_queues(skb->dev);//rehash_rss函数指针指向default_rehash_rss_func
 
   /* This is a memory holder for storing parsed packet information
      that will then be freed when the packet has been handled
@@ -3925,7 +3925,7 @@ static int add_skb_to_ring(struct sk_buff *skb,
   }
 
   /* Extensions */
-  fwd_pkt = pfr->sw_filtering_rules_default_accept_policy;
+  fwd_pkt = pfr->sw_filtering_rules_default_accept_policy;//ring_alloc_mem时赋值1
 
   /* ************************** */
 
@@ -3934,8 +3934,8 @@ static int add_skb_to_ring(struct sk_buff *skb,
   debug_printk(2, "ring_id=%d pfr->filtering_sample_rate=%u pfr->filtering_sampling_size=%u\n",
     pfr->ring_id, pfr->filtering_sample_rate, pfr->filtering_sampling_size);
 
-  /* [2.1] Search the hash */
-  if(pfr->sw_filtering_hash != NULL) {
+  /* [2.1] Search the hash */ //ring_alloc_mem时赋值pfr->num_sw_filtering_hash = pfr->num_sw_filtering_rules = pfr->num_hw_filtering_rules = 0;
+    if(pfr->sw_filtering_hash != NULL) {
     sw_filtering_hash_bucket *hash_bucket = NULL;
 
     read_lock_bh(&pfr->ring_rules_lock);
@@ -3977,7 +3977,7 @@ static int add_skb_to_ring(struct sk_buff *skb,
   if(fwd_pkt) { /* We accept the packet: it needs to be queued */
 
     /* [3] Packet sampling */
-    if(pfr->sample_rate > 1) {
+    if(pfr->sample_rate > 1) { //ring_create中赋值1
       spin_lock_bh(&pfr->ring_index_lock);
 
       if(!sample_packet(pfr)) {
@@ -4345,7 +4345,7 @@ int pf_ring_skb_ring_handler(struct sk_buff *skb,
       }
     }
   } else {
-    is_ip_pkt = parse_pkt(skb, real_skb, displ, &hdr, &ip_id);
+    is_ip_pkt = parse_pkt(skb, real_skb, displ, &hdr, &ip_id);//解析各层的头信息存放到hdr中  ip数据报标识存放在ip_id中
 
     if(enable_ip_defrag) {
       if(real_skb
@@ -4365,7 +4365,7 @@ int pf_ring_skb_ring_handler(struct sk_buff *skb,
     hdr.extended_hdr.rx_direction = recv_packet;
 
     /* [1] Check unclustered sockets */
-    sk = (struct sock*)lockless_list_get_first(&ring_table, &last_list_idx);
+    sk = (struct sock*)lockless_list_get_first(&ring_table, &last_list_idx);//ring_create时放到ring_table中的
 
     while(sk != NULL) {
       pfr = ring_sk(sk);
@@ -4728,7 +4728,7 @@ static int ring_create(struct net *net, struct socket *sock, int protocol
   pfr->sample_rate = 1;        /* No sampling */
   pfr->filtering_sample_rate = 0; /* No filtering sampling */
   pfr->filtering_sampling_size = 0;
-  sk->sk_family = PF_RING;
+  sk->sk_family = PF_RING;  //协议族
   sk->sk_destruct = ring_sock_destruct;
   pfr->ring_id = atomic_inc_return(&ring_id_serial);
   pfr->vlan_id = RING_ANY_VLAN;
@@ -4738,10 +4738,10 @@ static int ring_create(struct net *net, struct socket *sock, int protocol
 
   pfr->ring_pid = pid;
 
-  if(ring_insert(sk) == -1)
+  if(ring_insert(sk) == -1)//将sk放到ring_table.list_elements[i]中
     goto free_pfr;
 
-  ring_proc_add(pfr);
+  ring_proc_add(pfr); //从网络命名空间获取私有数据  然后创建proc条目
 
   debug_printk(2, "created\n");
 
@@ -5895,7 +5895,7 @@ static int do_memory_mmap(struct vm_area_struct *vma, unsigned long start_off, u
     int rc;
 
     if(mode == 0) {
-      rc = remap_vmalloc_range(vma, ptr, ptr_pg_off);
+      rc = remap_vmalloc_range(vma, ptr, ptr_pg_off);//将内核中的 vmalloc 分配的虚拟地址空间映射到用户空间
       break; /* Do not iterate */
     } else if(mode == 1) {
       rc = remap_pfn_range(vma, start, __pa(ptr) >> PAGE_SHIFT, PAGE_SIZE, PAGE_SHARED);
@@ -5979,7 +5979,7 @@ static int ring_mmap(struct file *file,
       }
 
       if(pfr->ring_memory == NULL) {
-        if(ring_alloc_mem(sk) != 0) {
+        if(ring_alloc_mem(sk) != 0) { //申请的内核空间赋值给pfr->ring_memory
           printk("[PF_RING] %s: unable to allocate memory\n", __FUNCTION__);
           return(-EINVAL);
         }
@@ -5993,7 +5993,7 @@ static int ring_mmap(struct file *file,
 
       debug_printk(2, "mmap [slot_len=%d][tot_slots=%d] for ring on device %s\n",
                pfr->slots_info->slot_len, pfr->slots_info->min_num_slots, pfr->ring_dev->dev->name);
-
+	    //内部调用remap_vmalloc_range将pfr->ring_memory映射到vma虚拟内存地址
       if((rc = do_memory_mmap(vma, 0, size, (void *) pfr->ring_memory, 0, VM_LOCKED, 0)) < 0)
         return(rc);
 
@@ -6118,7 +6118,7 @@ static int pf_ring_inject_packet_to_stack(struct net_device *netdev, struct msgh
 
 #if((LINUX_VERSION_CODE >= KERNEL_VERSION(5,18,0)) || (defined(REDHAT_PATCHED_KERNEL) && (LINUX_VERSION_CODE >= KERNEL_VERSION(5,14,0))))
   local_bh_disable();
-  err = netif_rx(skb);
+  err = netif_rx(skb);//将skb放到softnet_data的input_pkt_queue中
   local_bh_enable();
 #else
   err = netif_rx_ni(skb);
@@ -6289,12 +6289,12 @@ unsigned int ring_poll(struct file *file,
      * - epoll function expects that whenever poll is called
      *   poll_wait is also called, otherwise epoll would timeout
      */
-    poll_wait(file, &pfr->ring_slots_waitqueue, wait);
+    poll_wait(file, &pfr->ring_slots_waitqueue, wait);//把调用 poll/select/epoll的进程挂到驱动指定的等待队列上。驱动在事件到来时（如数据可读、可写）通过wake_up_interruptible唤醒这些进程
 
     /* Flush the queue when watermark reached */
     if(num_queued_pkts(pfr) >= pfr->poll_num_pkts_watermark) {
       mask |= POLLIN | POLLRDNORM;
-      pfr->queue_nonempty_timestamp=0;
+      pfr->queue_nonempty_timestamp=0;//ring_create初始为0
     }
 
     if(pfr->poll_watermark_timeout > 0) {
@@ -8706,7 +8706,7 @@ static int ring_ioctl(struct socket *sock, unsigned int cmd, unsigned long arg)
 
 /* ************************************* */
 
-static struct proto_ops ring_ops = {
+static struct proto_ops ring_ops = { //sock的ops成员
   .family = PF_RING,
   .owner = THIS_MODULE,
 
@@ -8735,7 +8735,7 @@ static struct proto_ops ring_ops = {
 
 /* ************************************ */
 
-static struct net_proto_family ring_family_ops = {
+static struct net_proto_family ring_family_ops = { //sock_register中注册协议族
   .family = PF_RING,
   .create = ring_create,
   .owner = THIS_MODULE,
@@ -8744,7 +8744,7 @@ static struct net_proto_family ring_family_ops = {
 static struct proto ring_proto = {
   .name = "PF_RING",
   .owner = THIS_MODULE,
-  .obj_size = sizeof(struct ring_sock),
+  .obj_size = sizeof(struct ring_sock), //sk_alloc调用sk_prot_alloc函数，根据obj_size字段分配内存
 };
 
 /* ************************************ */
@@ -8841,7 +8841,7 @@ static const struct file_operations ring_proc_dev_fops = {
   .release = single_release,
 };
 #else
-static const struct proc_ops ring_proc_dev_fops = {
+static const struct proc_ops ring_proc_dev_fops = {  //proc操作集  proc_create_data函数传入
   .proc_open = ring_proc_dev_open,
   .proc_read = seq_read,
   .proc_lseek = seq_lseek,
@@ -9088,7 +9088,7 @@ static int ring_notifier(struct notifier_block *this, unsigned long msg, void *d
       }
 
       if(!if_name_clash) {
-        if(add_device_to_ring_list(dev, dev_index) != 0) {
+        if(add_device_to_ring_list(dev, dev_index) != 0) { //kmalloc申请pf_ring_device空间,然后赋值,最后将设备挂到ring_aware_device_list链上
           printk("[PF_RING] Error in add_device_to_ring_list(%s)\n", dev->name);
         }
       }
@@ -9201,7 +9201,7 @@ static void __net_exit ring_net_exit(struct net *net)
 /* ************************************ */
 
 static struct pernet_operations ring_net_ops = {
-  .init = ring_net_init,
+  .init = ring_net_init,//创建网络命名空间 proc文件系统等
   .exit = ring_net_exit,
   .id = &pf_ring_net_id,
   .size = sizeof(pf_ring_net),
@@ -9291,33 +9291,33 @@ static int __init ring_init(void)
   printk("[PF_RING] IP Defragment    %s\n",
          enable_ip_defrag ? "Yes" : "No");
 
-  if((rc = proto_register(&ring_proto, 0)) != 0)
+  if((rc = proto_register(&ring_proto, 0)) != 0) //inet_init函数中注册协议处理函数(例如TCP UDP) ring_proto.node挂到proto_list这个全局链表上
     return(rc);
 
-  init_lockless_list(&ring_table);
+  init_lockless_list(&ring_table); //ring_table的成员(void* list_elements[MAX_NUM_LIST_ELEMENTS])中放的是sock*
   init_lockless_list(&ring_cluster_list);
   init_lockless_list(&delayed_memory_table);
 
   INIT_LIST_HEAD(&virtual_filtering_devices_list);
-  INIT_LIST_HEAD(&ring_aware_device_list);
+  INIT_LIST_HEAD(&ring_aware_device_list);//pf_ring_device设备链表
   INIT_LIST_HEAD(&zc_devices_list);
   INIT_LIST_HEAD(&cluster_referee_list);
 
   for(i = 0; i < NUM_FRAGMENTS_HASH_SLOTS; i++)
     INIT_LIST_HEAD(&cluster_fragment_hash[i]);
 
-  memset(&any_dev, 0, sizeof(any_dev));
+  memset(&any_dev, 0, sizeof(any_dev)); //net_device
   strcpy(any_dev.name, "any");
   any_dev.ifindex = MAX_NUM_IFINDEX-1;
   any_dev.type = ARPHRD_ETHER;
-  memset(&any_device_element, 0, sizeof(any_device_element));
+  memset(&any_device_element, 0, sizeof(any_device_element)); //pf_ring_device
   any_device_element.dev = &any_dev;
   any_device_element.device_type = standard_nic_family;
   any_device_element.dev_index = MAX_NUM_DEV_IDX-1;
   strcpy(any_device_element.device_name, "any");
 
   INIT_LIST_HEAD(&any_device_element.device_list);
-  list_add(&any_device_element.device_list, &ring_aware_device_list);
+  list_add(&any_device_element.device_list, &ring_aware_device_list);//头插法
 
   memset(&none_dev, 0, sizeof(none_dev));
   strcpy(none_dev.name, "none");
@@ -9328,11 +9328,13 @@ static int __init ring_init(void)
   none_device_element.device_type = standard_nic_family;
   none_device_element.dev_index = MAX_NUM_DEV_IDX-2;
   strcpy(none_device_element.device_name, "none");
-
+  //注册协议族 放到全局数组static const struct net_proto_family __rcu *net_families[NPROTO] __read_mostly;
   sock_register(&ring_family_ops);
+  //注册网络协议栈命名空间  将ring_net_ops的list放到first_device全局链表的尾部 并执行.init函数
   register_pernet_subsys(&ring_net_ops);
-  register_netdevice_notifier(&ring_netdev_notifier);
-
+  //注册网络设备通知回调函数的函数。它的主要用途是允许内核模块或子系统在特定的网络设备事件发生时接收通知
+  register_netdevice_notifier(&ring_netdev_notifier);//遍历网络命名空间中所有的设备 然后执行NETDEV_REGISTER NETDEV_UP两个操作
+  //内部调用了dev_add_pack(&prot_hook) 注册接收函数到ptype_all哈希表中(IP协议在ptype_base中)
   register_device_handler();
 
   printk("[PF_RING] pf_ring initialized correctly\n");

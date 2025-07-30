@@ -49,7 +49,7 @@ void pfring_device_add_elem(pfring_device* device, char *ifname, u_int16_t vlan_
   elem->ifname = ifname;
   elem->vlan_id = vlan_id;
   elem->next = device->elems;
-  device->elems = elem;
+  device->elems = elem;//elems是一个单向链表
 }
 
 u_int64_t pfring_parse_channel_mask_string(char* chmask) {
@@ -155,7 +155,7 @@ pfring_device* pfring_parse_device_name(char* device_name) {
 __raw:
     *curr_ifname_end = *ch;
     curr_ifname_end ++;
-    if ((curr_ifname_end - curr_ifname) >= IFNAMSIZ) {
+    if ((curr_ifname_end - curr_ifname) >= IFNAMSIZ) {//名字最长16个字符
       pfring_device_free(dev);
       return NULL;
     }

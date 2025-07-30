@@ -95,7 +95,7 @@ int pfring_mod_open_setup(pfring *ring) {
 #endif
 
   if(ring->caplen > MAX_CAPLEN) ring->caplen = MAX_CAPLEN;
-  rc = setsockopt(ring->fd, 0, SO_RING_BUCKET_LEN, &ring->caplen, sizeof(ring->caplen));
+  rc = setsockopt(ring->fd, 0, SO_RING_BUCKET_LEN, &ring->caplen, sizeof(ring->caplen));//设置struct pf_ring_socket成员bucket_len
 
   if(rc < 0) {
     close(ring->fd);
@@ -103,7 +103,7 @@ int pfring_mod_open_setup(pfring *ring) {
   }
 
   if(!ring->long_header) {
-    rc = setsockopt(ring->fd, 0, SO_USE_SHORT_PKT_HEADER, &ring->long_header, sizeof(ring->long_header));
+    rc = setsockopt(ring->fd, 0, SO_USE_SHORT_PKT_HEADER, &ring->long_header, sizeof(ring->long_header));//struct pf_ring_socket成员header_len
     
     if(rc < 0) {
       close(ring->fd);
@@ -116,7 +116,7 @@ int pfring_mod_open_setup(pfring *ring) {
     rc = 0;
   } else {
     /* "any" or "<interface name>" */
-    rc = pfring_bind(ring, ring->device_name);
+    rc = pfring_bind(ring, ring->device_name);//根据设备名获取struct pfring_device然后遍历其elems链表，依次调用bind
   }
 
   if(rc < 0) {
@@ -178,7 +178,7 @@ int pfring_mod_open_setup(pfring *ring) {
   if(ring->promisc)
     pfring_set_promisc(ring, 1);
 
-  ring->slot_header_len = pfring_get_slot_header_len(ring);
+  ring->slot_header_len = pfring_get_slot_header_len(ring);//获取struct pf_ring_socket成员slot_header_len
   if(ring->slot_header_len == (u_int16_t)-1) {
     fprintf(stderr, "[PF_RING] ring failure (pfring_get_slot_header_len)\n");
     close(ring->fd);
@@ -238,13 +238,13 @@ int pfring_mod_open(pfring *ring) {
   ring->purge_idle_rules = pfring_mod_purge_idle_rules;
   ring->get_filtering_rule_stats = pfring_mod_get_filtering_rule_stats;
   ring->toggle_filtering_policy = pfring_mod_toggle_filtering_policy;
-  ring->enable_rss_rehash = pfring_mod_enable_rss_rehash;
+  ring->enable_rss_rehash = pfring_mod_enable_rss_rehash;//struct pf_ring_socket成员rehash_rss设置函数指针为default_rehash_rss_func
   ring->poll = pfring_mod_poll;
   ring->version = pfring_mod_version;
-  ring->get_bound_device_address = pfring_mod_get_bound_device_address;
-  ring->get_bound_device_ifindex = pfring_mod_get_bound_device_ifindex;
-  ring->get_device_ifindex = pfring_mod_get_device_ifindex;
-  ring->get_slot_header_len = pfring_mod_get_slot_header_len;
+  ring->get_bound_device_address = pfring_mod_get_bound_device_address;//获取struct pf_ring_socket成员ring_dev->dev->dev_addr
+  ring->get_bound_device_ifindex = pfring_mod_get_bound_device_ifindex;//获取struct pf_ring_socket成员ring_dev->dev->ifindex(其中dev类型是struct net_device *)
+  ring->get_device_ifindex = pfring_mod_get_device_ifindex;//通过网卡名获取struct pf_ring_device成员dev->ifindex
+  ring->get_slot_header_len = pfring_mod_get_slot_header_len;//获取struct pf_ring_socket成员slot_header_len
   ring->set_virtual_device = pfring_mod_set_virtual_device;
   ring->add_hw_rule = pfring_hw_ft_add_hw_rule;
   ring->remove_hw_rule = pfring_hw_ft_remove_hw_rule;
@@ -252,8 +252,8 @@ int pfring_mod_open(pfring *ring) {
   ring->enable_ring = pfring_mod_enable_ring;
   ring->disable_ring = pfring_mod_disable_ring;
   ring->is_pkt_available = pfring_mod_is_pkt_available;
-  ring->set_bpf_filter = pfring_mod_set_bpf_filter;
-  ring->remove_bpf_filter = pfring_mod_remove_bpf_filter;
+  ring->set_bpf_filter = pfring_mod_set_bpf_filter;//使用pcap支持bpf  内核空间调用sk_attach_filter
+  ring->remove_bpf_filter = pfring_mod_remove_bpf_filter;//内核空间调用sk_detach_filter
   ring->shutdown = pfring_mod_shutdown;
   ring->send_last_rx_packet = pfring_mod_send_last_rx_packet;
   ring->get_interface_speed = pfring_mod_get_interface_speed;
@@ -342,14 +342,14 @@ int pfring_mod_bind(pfring *ring, char *device_name) {
 
   for (it = device->elems; it != NULL; it=it->next) {
 #ifdef RING_USE_SOCKADDR_LL
-    if (pfring_mod_get_device_ifindex(ring, it->ifname, &ifindex) == 0) {
+    if (pfring_mod_get_device_ifindex(ring, it->ifname, &ifindex) == 0) {//调用getsockopt(SO_GET_DEVICE_IFINDEX)
       memset(&sll, 0, sizeof(sll));
 
       sll.sll_family = PF_RING;
       sll.sll_ifindex = ifindex;
       sll.sll_protocol = ETH_P_ALL;
 
-      rc = bind(ring->fd, (struct sockaddr *) &sll, sizeof(sll));
+      rc = bind(ring->fd, (struct sockaddr *) &sll, sizeof(sll));//协议栈的bind
     } else {
       rc = -1;
     }
@@ -367,7 +367,7 @@ int pfring_mod_bind(pfring *ring, char *device_name) {
     rc = bind(ring->fd, (struct sockaddr *)&sa, sizeof(sa));
 #endif
     if(rc == 0) {
-      rc = pfring_set_channel_mask(ring, device->channel_mask);
+      rc = pfring_set_channel_mask(ring, device->channel_mask);//setsockopt(SO_SET_CHANNEL_ID)
       /*
          if(rc != 0)
          printf("pfring_set_channel_id() failed: %d\n", rc);
@@ -538,14 +538,14 @@ int pfring_mod_recv(pfring *ring, u_char** buffer, u_int buffer_len,
         sizeof(u_int16_t), ALIGN(real_slot_len, sizeof(u_int64_t)) - real_slot_len);
 #endif
 
-      real_slot_len = ALIGN(real_slot_len, sizeof(u_int64_t));
+      real_slot_len = ALIGN(real_slot_len, sizeof(u_int64_t));//ALIGN(a,b) a上取整b的倍数
 
       if(bktLen > buffer_len) bktLen = buffer_len;
 
       if(buffer_len == 0)
-	*buffer = (u_char *) &bucket[ring->slot_header_len];
+	*buffer = (u_char *) &bucket[ring->slot_header_len]; //把数据的地址传到入参
       else
-	memcpy(*buffer, &bucket[ring->slot_header_len], bktLen);
+	memcpy(*buffer, &bucket[ring->slot_header_len], bktLen); //拷贝数据
 
       next_off = ring->slots_info->remove_off + real_slot_len;
       if((next_off + ring->slots_info->slot_len) > (ring->slots_info->tot_mem - sizeof(FlowSlotInfo)))
@@ -571,7 +571,7 @@ int pfring_mod_recv(pfring *ring, u_char** buffer, u_int buffer_len,
     if(unlikely(ring->reentrant)) pfring_rwlock_unlock(&ring->rx_lock);
 
     if(wait_for_incoming_packet) {
-      rc = pfring_poll(ring, ring->poll_duration);
+      rc = pfring_poll(ring, ring->poll_duration);//内部调用poll
 
       if((rc == -1) && (errno != EINTR))
 	return(-1);
@@ -687,11 +687,11 @@ int pfring_mod_poll(pfring *ring, u_int wait_duration) {
 
     /* Sleep when nothing is happening */
     pfd.fd      = ring->fd;
-    pfd.events  = POLLIN /* | POLLERR */;
+    pfd.events  = POLLIN /* | POLLERR */;  //数据可读
     pfd.revents = 0;
     errno       = 0;
 
-    rc = poll(&pfd, 1, wait_duration);
+    rc = poll(&pfd, 1, wait_duration);//成功返回就绪文件描述符数  超时返回0  失败返回-1
     ring->num_poll_calls++;
 
     return(rc);
